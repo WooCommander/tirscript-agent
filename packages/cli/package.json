@@ -1,0 +1,9 @@
+{
+  "name": "@corporate-agent/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": { "agent": "./dist/index.js" },
+  "scripts": { "build": "tsc -p tsconfig.json", "check": "tsc -p tsconfig.json --noEmit", "test": "node -e \"\"" },
+  "dependencies": { "@corporate-agent/core": "workspace:*", "@corporate-agent/model-provider": "workspace:*", "@corporate-agent/protocol": "workspace:*" }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "@corporate-agent/model-provider",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "development": "./src/index.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test dist/index.test.js"
+  },
+  "dependencies": {
+    "@corporate-agent/protocol": "workspace:*",
+    "@openai/codex-sdk": "^0.153.4"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "corporate-ai-agent",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@11.20.0",
+  "scripts": {
+    "dev": "node --experimental-strip-types --conditions=development packages/cli/src/index.ts",
+    "build": "pnpm -r build",
+    "check": "pnpm --filter @corporate-agent/protocol build && pnpm -r check",
+    "test": "pnpm -r test"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  }
+}
