@@ -39,6 +39,13 @@ export interface FileSummary {
   readonly updatedAt: string;
 }
 
+export interface AuditEvent {
+  readonly taskId: string;
+  readonly event: string;
+  readonly details: unknown;
+  readonly createdAt: string;
+}
+
 export class MemoryEngine {
   private constructor(private readonly database: DatabaseSync) {}
 
@@ -116,6 +123,11 @@ export class MemoryEngine {
       .run(taskId, event, JSON.stringify(details), timestamp());
   }
 
+  listAudit(limit = 50): readonly AuditEvent[] {
+    const rows = this.database.prepare("SELECT task_id, event, details_json, created_at FROM audit_events ORDER BY id DESC LIMIT ?").all(limit);
+    return rows.filter(isAuditRow).map((row) => ({ taskId: row.task_id, event: row.event, details: JSON.parse(row.details_json), createdAt: row.created_at }));
+  }
+
   close(): void { this.database.close(); }
 
   private migrate(): void {
@@ -169,5 +181,8 @@ function isFileIndexRow(value: unknown): value is { path: string; sha256: string
 }
 function isFileSummaryRow(value: unknown): value is { path: string; sha256: string; summary: string; analyzer_version: string; updated_at: string } {
   return isRecord(value) && typeof value.path === "string" && typeof value.sha256 === "string" && typeof value.summary === "string" && typeof value.analyzer_version === "string" && typeof value.updated_at === "string";
+}
+function isAuditRow(value: unknown): value is { task_id: string; event: string; details_json: string; created_at: string } {
+  return isRecord(value) && typeof value.task_id === "string" && typeof value.event === "string" && typeof value.details_json === "string" && typeof value.created_at === "string";
 }
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null; }

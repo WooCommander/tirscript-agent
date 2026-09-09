@@ -190,6 +190,7 @@ node ..\..\packages\cli\dist\index.js config
 ```powershell
 node ..\..\packages\cli\dist\index.js history
 node ..\..\packages\cli\dist\index.js status
+node ..\..\packages\cli\dist\index.js audit
 ```
 
 Для продолжения сначала получите идентификатор из `history`, затем сохраните его в переменную:

@@ -13,7 +13,7 @@ const workspace = process.cwd();
 
 if (command === "config") {
   console.log(JSON.stringify(await loadConfig(workspace), null, 2));
-} else if (command === "history" || command === "status") {
+} else if (command === "history" || command === "status" || command === "audit") {
   await showMemory(command);
 } else if (command === "resume") {
   await resumeTask(args);
@@ -29,13 +29,14 @@ if (command === "config") {
   console.log(result.response);
   if (showReport) console.log(formatTaskReport(result.report));
 } else {
-  fail("Usage: agent <ask|inspect|run> [--report] <prompt|task-file> | agent resume <task-id> <prompt> | agent <history|status|chat|config>");
+  fail("Usage: agent <ask|inspect|run> [--report] <prompt|task-file> | agent resume <task-id> <prompt> | agent <history|status|audit|chat|config>");
 }
 
-async function showMemory(command: "history" | "status"): Promise<void> {
+async function showMemory(command: "history" | "status" | "audit"): Promise<void> {
   const memory = await MemoryEngine.open(workspace);
   try {
     if (command === "history") console.log(JSON.stringify(memory.listTasks(), null, 2));
+    else if (command === "audit") console.log(JSON.stringify(memory.listAudit(), null, 2));
     else console.log(JSON.stringify(memory.latestCheckpoint(), null, 2));
   } finally { memory.close(); }
 }

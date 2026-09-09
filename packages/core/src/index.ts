@@ -73,7 +73,7 @@ export class AgentRuntime {
     const memory = await this.startMemory(task, config);
     memory?.recordAudit(task.id, "task.started", { mode, provider: this.provider.name });
     this.logger.info("task.started", { taskId: task.id, mode, provider: this.provider.name });
-    const policy = new PolicyEngine(workspace, { deniedFiles: config.security.deniedFiles, allowedHosts: config.security.allowedHosts });
+    const policy = new PolicyEngine(workspace, policyConfig(config));
     const tools = new WorkspaceTools(workspace, policy);
     const context = new ContextEngine(tools, memory);
     const preparedContext = mode === "inspect" ? await context.prepare(prompt, contextBudget(config)) : null;
@@ -119,7 +119,7 @@ export class AgentRuntime {
     const task: AgentTask = { id: randomUUID(), mode: "run", prompt, workspace, status: "running" };
     const memory = await this.startMemory(task, config);
     memory?.recordAudit(task.id, "task.started", { mode: "run", provider: this.provider.name });
-    const policy = new PolicyEngine(workspace, { deniedFiles: config.security.deniedFiles, allowedHosts: config.security.allowedHosts });
+    const policy = new PolicyEngine(workspace, policyConfig(config));
     const tools = new WorkspaceTools(workspace, policy);
     this.logger.info("task.started", { taskId: task.id, mode: "run", provider: this.provider.name });
     const preparedContext = await new ContextEngine(tools, memory).prepare(prompt, contextBudget(config));
@@ -244,6 +244,10 @@ function contextBudget(config: AgentConfig): ContextBudget {
   return config.context ?? { maxFiles: 6, maxChars: 30_000 };
 }
 
+function policyConfig(config: AgentConfig): { readonly allowedHosts: readonly string[]; readonly deniedFiles?: readonly string[] } {
+  return { allowedHosts: config.security.allowedHosts, ...(config.security.deniedFiles === undefined ? {} : { deniedFiles: config.security.deniedFiles }) };
+}
+
 function formatContext(files: readonly ContextFile[]): string {
   return files.map((file) => `PATH: ${file.path}\nSHA256: ${file.sha256}\nEXPORTS: ${file.exports.join(", ") || "none"}\nIMPORTS: ${file.imports.join(", ") || "none"}\nCONTENT:\n${file.content}`).join("\n\n---\n\n");
 }
@@ -272,7 +276,7 @@ function validateConfig(value: unknown): AgentConfig {
   }
   return {
     provider: { type: provider.type, model: provider.model, ...(typeof provider.baseUrl === "string" ? { baseUrl: provider.baseUrl } : {}), ...(typeof provider.apiKeyEnv === "string" ? { apiKeyEnv: provider.apiKeyEnv } : {}) },
-    security: { isolationMode: security.isolationMode, allowInternet: security.allowInternet, allowedHosts: security.allowedHosts, ...(isStringArray(security.deniedFiles) ? { deniedFiles: security.deniedFiles } : { deniedFiles: defaultConfig.security.deniedFiles }) },
+    security: { isolationMode: security.isolationMode, allowInternet: security.allowInternet, allowedHosts: security.allowedHosts, ...(isStringArray(security.deniedFiles) ? { deniedFiles: security.deniedFiles } : {}) },
     execution: { maxIterations: execution.maxIterations, maxTokens: execution.maxTokens, timeoutMs: execution.timeoutMs },
     memory: isRecord(value.memory) && typeof value.memory.enabled === "boolean" ? { enabled: value.memory.enabled } : { enabled: true },
     context: isRecord(context) ? { maxFiles: context.maxFiles as number, maxChars: context.maxChars as number } : { maxFiles: 6, maxChars: 30_000 }
