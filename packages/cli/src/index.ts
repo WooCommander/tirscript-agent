@@ -6,12 +6,17 @@ import { stdin, stdout } from "node:process";
 import { AgentRuntime, Logger, formatTaskReport, loadConfig } from "@corporate-agent/core";
 import { CodexLocalProvider, MockModelProvider } from "@corporate-agent/model-provider";
 import type { AgentMode } from "@corporate-agent/protocol";
+import { MemoryEngine } from "@corporate-agent/memory-engine";
 
 const [command, ...args] = process.argv.slice(2);
 const workspace = process.cwd();
 
 if (command === "config") {
   console.log(JSON.stringify(await loadConfig(workspace), null, 2));
+} else if (command === "history" || command === "status") {
+  await showMemory(command);
+} else if (command === "resume") {
+  await resumeTask(args);
 } else if (command === "chat") {
   await startChat();
 } else if (command === "ask" || command === "inspect" || command === "run") {
@@ -24,7 +29,28 @@ if (command === "config") {
   console.log(result.response);
   if (showReport) console.log(formatTaskReport(result.report));
 } else {
-  fail("Usage: agent <ask|inspect|run> [--report] <prompt|task-file> | agent chat | agent config");
+  fail("Usage: agent <ask|inspect|run> [--report] <prompt|task-file> | agent resume <task-id> <prompt> | agent <history|status|chat|config>");
+}
+
+async function showMemory(command: "history" | "status"): Promise<void> {
+  const memory = await MemoryEngine.open(workspace);
+  try {
+    if (command === "history") console.log(JSON.stringify(memory.listTasks(), null, 2));
+    else console.log(JSON.stringify(memory.latestCheckpoint(), null, 2));
+  } finally { memory.close(); }
+}
+
+async function resumeTask(args: readonly string[]): Promise<void> {
+  const [taskId, ...promptParts] = args;
+  const prompt = promptParts.join(" ").trim();
+  if (taskId === undefined || !prompt) fail("Usage: agent resume <task-id> <prompt>");
+  const memory = await MemoryEngine.open(workspace);
+  const checkpoint = memory.latestCheckpoint(taskId);
+  memory.close();
+  if (checkpoint === null) fail(`Checkpoint not found for task: ${taskId}`);
+  const config = await loadConfig(workspace);
+  const result = await createRuntime(config).execute("resume", `Continue from trusted checkpoint:\n${JSON.stringify(checkpoint.state)}\n\nNew instruction:\n${prompt}`, workspace, config);
+  console.log(result.response);
 }
 
 async function startChat(): Promise<void> {

@@ -14,6 +14,7 @@ export interface ModelRequest {
   readonly workspace: string;
   readonly systemInstructions: readonly string[];
   readonly maxTokens: number;
+  readonly outputSchema?: unknown;
   readonly signal?: AbortSignal;
 }
 
@@ -34,6 +35,7 @@ export interface AgentConfig {
   readonly provider: { readonly type: "mock" | "codex-local" | "openai-compatible"; readonly model: string; readonly baseUrl?: string };
   readonly security: { readonly isolationMode: "strict" | "permissive"; readonly allowInternet: boolean; readonly allowedHosts: readonly string[] };
   readonly execution: { readonly maxIterations: number; readonly maxTokens: number; readonly timeoutMs: number };
+  readonly memory?: { readonly enabled: boolean };
 }
 
 export interface AgentTask {

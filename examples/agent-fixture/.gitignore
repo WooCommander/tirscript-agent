@@ -1,0 +1,5 @@
+node_modules/
+coverage/
+.agent/*.sqlite
+.agent/logs/
+.agent/tool-results/

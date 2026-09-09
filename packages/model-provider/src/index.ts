@@ -38,12 +38,15 @@ export class CodexLocalProvider implements ModelProvider {
   }
 
   async generate(request: ModelRequest): Promise<ModelResponse> {
-    if (request.mode !== "ask" && request.mode !== "inspect") {
-      throw new Error("codex-local supports only ask and inspect modes during the test phase");
+    if (request.mode !== "ask" && request.mode !== "inspect" && request.mode !== "run" && request.mode !== "resume") {
+      throw new Error("codex-local supports only ask, inspect, run and resume modes during the test phase");
     }
     const thread = this.thread ?? this.startThread(request.workspace);
     this.thread = thread;
-    const turnOptions = request.signal === undefined ? {} : { signal: request.signal };
+    const turnOptions = {
+      ...(request.signal === undefined ? {} : { signal: request.signal }),
+      ...(request.outputSchema === undefined ? {} : { outputSchema: request.outputSchema })
+    };
     const result = await thread.run(`${request.systemInstructions.join("\n")}\n\nUser request:\n${request.prompt}`, turnOptions);
     return {
       text: result.finalResponse,

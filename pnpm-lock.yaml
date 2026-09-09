@@ -20,6 +20,9 @@ importers:
       '@corporate-agent/core':
         specifier: workspace:*
         version: link:../core
+      '@corporate-agent/memory-engine':
+        specifier: workspace:*
+        version: link:../memory-engine
       '@corporate-agent/model-provider':
         specifier: workspace:*
         version: link:../model-provider
@@ -29,6 +32,9 @@ importers:
 
   packages/core:
     dependencies:
+      '@corporate-agent/memory-engine':
+        specifier: workspace:*
+        version: link:../memory-engine
       '@corporate-agent/policy-engine':
         specifier: workspace:*
         version: link:../policy-engine
@@ -38,6 +44,12 @@ importers:
       '@corporate-agent/tools':
         specifier: workspace:*
         version: link:../tools
+
+  packages/memory-engine:
+    dependencies:
+      '@corporate-agent/protocol':
+        specifier: workspace:*
+        version: link:../protocol
 
   packages/model-provider:
     dependencies:

@@ -1,0 +1,19 @@
+{
+  "provider": {
+    "type": "mock",
+    "model": "corporate-agent-test-model"
+  },
+  "security": {
+    "isolationMode": "strict",
+    "allowInternet": false,
+    "allowedHosts": []
+  },
+  "execution": {
+    "maxIterations": 3,
+    "maxTokens": 4000,
+    "timeoutMs": 120000
+  },
+  "memory": {
+    "enabled": true
+  }
+}

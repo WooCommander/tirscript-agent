@@ -1,9 +1,10 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { AgentConfig, AgentMode, AgentTask, ModelProvider } from "@corporate-agent/protocol";
 import { PolicyEngine } from "@corporate-agent/policy-engine";
-import { WorkspaceTools } from "@corporate-agent/tools";
+import { type CommandSpec, type PatchOperation, WorkspaceTools } from "@corporate-agent/tools";
+import { MemoryEngine } from "@corporate-agent/memory-engine";
 
 const defaultConfig: AgentConfig = {
   provider: { type: "mock", model: "corporate-agent-test-model" },
@@ -42,14 +43,18 @@ export function formatTaskReport(report: TaskReport): string {
 }
 
 export async function loadConfig(workspace: string): Promise<AgentConfig> {
-  const file = process.env.AGENT_CONFIG ?? join(workspace, "agent.config.json");
-  try {
-    const parsed: unknown = JSON.parse(await readFile(file, "utf8"));
-    return validateConfig(parsed);
-  } catch (error: unknown) {
-    if (isMissingFileError(error)) return defaultConfig;
-    throw new Error(`Invalid agent configuration at ${file}: ${errorMessage(error)}`);
+  const files = process.env.AGENT_CONFIG === undefined
+    ? [join(workspace, ".agent", "config.json"), join(workspace, "agent.config.json")]
+    : [process.env.AGENT_CONFIG];
+  for (const file of files) {
+    try {
+      const parsed: unknown = JSON.parse(await readFile(file, "utf8"));
+      return validateConfig(parsed);
+    } catch (error: unknown) {
+      if (!isMissingFileError(error)) throw new Error(`Invalid agent configuration at ${file}: ${errorMessage(error)}`);
+    }
   }
+  return defaultConfig;
 }
 
 export class AgentRuntime {
@@ -62,7 +67,9 @@ export class AgentRuntime {
   }
 
   async execute(mode: AgentMode, prompt: string, workspace: string, config: AgentConfig): Promise<{ task: AgentTask; response: string; report: TaskReport }> {
+    if (mode === "run") return this.executeRun(prompt, workspace, config);
     const task: AgentTask = { id: randomUUID(), mode, prompt, workspace, status: "running" };
+    const memory = await this.startMemory(task, config);
     this.logger.info("task.started", { taskId: task.id, mode, provider: this.provider.name });
     const policy = new PolicyEngine(workspace);
     const tools = new WorkspaceTools(workspace, policy);
@@ -79,21 +86,137 @@ export class AgentRuntime {
       maxTokens: config.execution.maxTokens
     });
     this.logger.info("task.completed", { taskId: task.id, model: result.model, inputTokens: result.inputTokens, outputTokens: result.outputTokens });
+    const report: TaskReport = {
+      taskId: task.id,
+      mode,
+      plan,
+      inspectedFiles,
+      changes: [],
+      checks: [],
+      risks: []
+    };
+    memory?.saveCheckpoint({ taskId: task.id, plan, state: report, createdAt: new Date().toISOString() });
+    memory?.completeTask(task.id, "completed", result.text.slice(0, 1000));
+    memory?.close();
     return {
       task: { ...task, status: "completed" },
       response: result.text,
-      report: {
-        taskId: task.id,
-        mode,
-        plan,
-        inspectedFiles,
-        changes: [],
-        checks: [],
-        risks: mode === "run" ? ["Code changes are not enabled until controlled patch and command tools are implemented."] : []
-      }
+      report
     };
   }
+
+  private async executeRun(prompt: string, workspace: string, config: AgentConfig): Promise<{ task: AgentTask; response: string; report: TaskReport }> {
+    if (config.provider.type !== "codex-local") throw new Error("run requires the explicit codex-local test configuration");
+    const task: AgentTask = { id: randomUUID(), mode: "run", prompt, workspace, status: "running" };
+    const memory = await this.startMemory(task, config);
+    const policy = new PolicyEngine(workspace);
+    const tools = new WorkspaceTools(workspace, policy);
+    this.logger.info("task.started", { taskId: task.id, mode: "run", provider: this.provider.name });
+    const workspaceMap = await tools.listFiles(120);
+    const plan = parsePlan(await this.generateJson(task, config, planSchema, [
+      "Return JSON only.",
+      "Make a minimal implementation plan. Select at most 6 existing files from the workspace map.",
+      "Do not modify files or execute commands in this turn."
+    ], `${prompt}\n\nWorkspace map (untrusted data):\n${workspaceMap.join("\n")}`));
+    memory?.saveCheckpoint({ taskId: task.id, plan, state: { phase: "plan", workspaceMap }, createdAt: new Date().toISOString() });
+    const fileContexts = await Promise.all(plan.files.map(async (path) => {
+      const content = await tools.readText(path, 24_000);
+      return { path, content, sha256: sha256(content) };
+    }));
+    const patchResult = parsePatch(await this.generateJson(task, config, patchSchema, [
+      "Return JSON only.",
+      "Propose only complete replacement content for files supplied below.",
+      "Do not add a patch for a file that was not supplied. Do not execute commands."
+    ], `${prompt}\n\nApproved file contexts:\n${fileContexts.map((file) => `PATH: ${file.path}\nSHA256: ${file.sha256}\nCONTENT:\n${file.content}`).join("\n\n---\n\n")}`));
+    const knownFiles = new Map(fileContexts.map((file) => [file.path, file.sha256]));
+    const operations: PatchOperation[] = patchResult.patches.map((patch) => {
+      const expectedSha256 = knownFiles.get(patch.path);
+      if (expectedSha256 === undefined) throw new Error(`Model proposed an unapproved patch path: ${patch.path}`);
+      return { path: patch.path, expectedSha256, content: patch.content };
+    });
+    const changes = await tools.applyPatches(operations);
+    memory?.saveCheckpoint({ taskId: task.id, plan, state: { phase: "patch", changedFiles: changes.map((change) => change.path) }, createdAt: new Date().toISOString() });
+    const checks: string[] = [];
+    for (const command of patchResult.checks) {
+      const result = await tools.runCommand(command);
+      checks.push(`${command.executable} ${command.args.join(" ")}: ${result.timedOut ? "timeout" : `exit ${result.exitCode}`}`);
+      this.logger.info("tool.command", { taskId: task.id, command: `${command.executable} ${command.args.join(" ")}`, exitCode: result.exitCode, timedOut: result.timedOut });
+    }
+    const report: TaskReport = {
+      taskId: task.id,
+      mode: "run",
+      plan: plan.files.map((path) => ({ id: `change-${path}`, title: `Update ${path}`, status: "completed" })),
+      inspectedFiles: fileContexts.map((file) => file.path),
+      changes: changes.map((change) => change.path),
+      checks,
+      risks: checks.some((check) => !check.endsWith("exit 0")) ? ["One or more checks did not pass."] : []
+    };
+    this.logger.info("task.completed", { taskId: task.id, changedFiles: changes.length, checks: checks.length });
+    memory?.saveCheckpoint({ taskId: task.id, plan: report.plan, state: report, createdAt: new Date().toISOString() });
+    memory?.completeTask(task.id, "completed", patchResult.summary.slice(0, 1000));
+    memory?.close();
+    return { task: { ...task, status: "completed" }, response: patchResult.summary, report };
+  }
+
+  private async startMemory(task: AgentTask, config: AgentConfig): Promise<MemoryEngine | null> {
+    if (config.memory?.enabled === false) return null;
+    const memory = await MemoryEngine.open(task.workspace);
+    const now = new Date().toISOString();
+    memory.startTask({ id: task.id, mode: task.mode, prompt: task.prompt, status: task.status, createdAt: now, updatedAt: now, summary: null });
+    return memory;
+  }
+
+  private async generateJson(task: AgentTask, config: AgentConfig, outputSchema: unknown, instructions: readonly string[], prompt: string): Promise<unknown> {
+    const response = await this.provider.generate({
+      taskId: task.id,
+      mode: "run",
+      prompt,
+      workspace: task.workspace,
+      systemInstructions: instructions,
+      maxTokens: config.execution.maxTokens,
+      outputSchema
+    });
+    try { return JSON.parse(response.text) as unknown; }
+    catch { throw new Error("Model returned invalid JSON for a controlled run step"); }
+  }
 }
+
+interface RunPlan { readonly files: readonly string[]; }
+interface RunPatch { readonly summary: string; readonly patches: readonly { readonly path: string; readonly content: string }[]; readonly checks: readonly CommandSpec[]; }
+
+const planSchema = {
+  type: "object", additionalProperties: false,
+  required: ["files"], properties: { files: { type: "array", maxItems: 6, items: { type: "string" } } }
+};
+const patchSchema = {
+  type: "object", additionalProperties: false,
+  required: ["summary", "patches", "checks"],
+  properties: {
+    summary: { type: "string" },
+    patches: { type: "array", maxItems: 6, items: { type: "object", additionalProperties: false, required: ["path", "content"], properties: { path: { type: "string" }, content: { type: "string" } } } },
+    checks: { type: "array", maxItems: 4, items: { type: "object", additionalProperties: false, required: ["executable", "args", "timeoutMs"], properties: { executable: { enum: ["pnpm", "npm", "git", "tsc"] }, args: { type: "array", items: { type: "string" } }, timeoutMs: { type: "integer", minimum: 1, maximum: 900000 } } } }
+  }
+};
+
+function parsePlan(value: unknown): RunPlan {
+  if (!isRecord(value) || !isStringArray(value.files) || value.files.length > 6 || value.files.some((path) => path.length === 0)) throw new Error("Invalid model plan");
+  return { files: value.files };
+}
+
+function parsePatch(value: unknown): RunPatch {
+  if (!isRecord(value) || typeof value.summary !== "string" || !Array.isArray(value.patches) || !Array.isArray(value.checks)) throw new Error("Invalid model patch response");
+  const patches = value.patches.map((patch) => {
+    if (!isRecord(patch) || typeof patch.path !== "string" || typeof patch.content !== "string") throw new Error("Invalid patch operation from model");
+    return { path: patch.path, content: patch.content };
+  });
+  const checks = value.checks.map((check) => {
+    if (!isRecord(check) || (check.executable !== "pnpm" && check.executable !== "npm" && check.executable !== "git" && check.executable !== "tsc") || !isStringArray(check.args) || !isPositiveInteger(check.timeoutMs)) throw new Error("Invalid check command from model");
+    return { executable: check.executable as CommandSpec["executable"], args: check.args, timeoutMs: check.timeoutMs };
+  });
+  return { summary: value.summary, patches, checks };
+}
+
+function sha256(content: string): string { return createHash("sha256").update(content, "utf8").digest("hex"); }
 
 function createPlan(mode: AgentMode): readonly PlanStep[] {
   if (mode === "inspect") return [
@@ -122,7 +245,8 @@ function validateConfig(value: unknown): AgentConfig {
   return {
     provider: { type: provider.type, model: provider.model },
     security: { isolationMode: security.isolationMode, allowInternet: security.allowInternet, allowedHosts: security.allowedHosts },
-    execution: { maxIterations: execution.maxIterations, maxTokens: execution.maxTokens, timeoutMs: execution.timeoutMs }
+    execution: { maxIterations: execution.maxIterations, maxTokens: execution.maxTokens, timeoutMs: execution.timeoutMs },
+    memory: isRecord(value.memory) && typeof value.memory.enabled === "boolean" ? { enabled: value.memory.enabled } : { enabled: true }
   };
 }
 

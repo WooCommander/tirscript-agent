@@ -1,7 +1,9 @@
 node_modules/
 dist/
 coverage/
-.agent/
+.agent/*.sqlite
+.agent/logs/
+.agent/tool-results/
 *.log
 packages/*/src/*.js
 packages/*/src/*.js.map

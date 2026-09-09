@@ -1,9 +1,9 @@
 {
-  "name": "@corporate-agent/core",
+  "name": "@corporate-agent/memory-engine",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "exports": { ".": { "development": "./src/index.ts", "default": "./dist/index.js" } },
   "scripts": { "build": "tsc -p tsconfig.json", "check": "tsc -p tsconfig.json --noEmit", "test": "node --test dist/index.test.js" },
-  "dependencies": { "@corporate-agent/protocol": "workspace:*", "@corporate-agent/policy-engine": "workspace:*", "@corporate-agent/tools": "workspace:*", "@corporate-agent/memory-engine": "workspace:*" }
+  "dependencies": { "@corporate-agent/protocol": "workspace:*" }
 }

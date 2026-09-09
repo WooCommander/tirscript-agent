@@ -1,54 +1,141 @@
 # Corporate AI Agent
 
-Каркас автономного корпоративного агента для разработки. Он рассчитан на локальную установку и OpenAI-совместимую модель во внутренней сети.
+Консольный агент для анализа и контролируемого изменения кода. Сейчас реализованы CLI, тестовый provider Codex, Policy Engine, patch с SHA-256, allowlist проверок, SQLite-память и checkpoint.
 
-## Текущий статус
+## Требования
 
-Выполнен этап 1 ТЗ: pnpm-monorepo, CLI, строгие контракты, загрузка конфигурации, структурированное журналирование и детерминированный `mock`-provider. Изменение файлов, запуск команд, SQLite-память и сетевой provider ещё не реализованы.
+- Node.js 24+
+- pnpm 11+
+- для реальных ответов: установленный и авторизованный Codex (`codex login`)
 
-## Быстрый запуск
-
-Без установки зависимостей (только mock-provider и Node.js 24+):
-
-```powershell
-pnpm dev ask "Опиши назначение агента"
-pnpm dev config
-```
-
-После установки зависимостей из внутреннего registry:
+Установка и сборка из корня репозитория:
 
 ```powershell
-pnpm install --registry https://registry.company.local
-pnpm build
-node packages/cli/dist/index.js ask "Опиши назначение агента"
-node packages/cli/dist/index.js config
+pnpm install
+pnpm check
+pnpm test
 ```
 
-По умолчанию включён только `mock`-provider. Конфигурация читается из `agent.config.json` в текущем проекте либо из пути в `AGENT_CONFIG`.
+## Где запускать агент
 
-## Временный тест с Codex
-
-`agent.codex-test.config.json` включает внешний provider для read-only команд `ask` и `inspect`. Он использует локальную авторизацию `codex login`, запускается в read-only sandbox и отключает web-search. Не используйте его для корпоративного кода или секретов.
+Текущий каталог определяет workspace: агент читает и меняет только файлы внутри него. Для безопасного первого запуска используйте тестовый проект:
 
 ```powershell
-$env:AGENT_CONFIG = "$PWD\agent.codex-test.config.json"
-node packages/cli/dist/index.js ask "Кратко объясни, что такое dependency injection"
-Remove-Item Env:AGENT_CONFIG
+cd C:\Projects\2026\tirscript-agent\examples\agent-fixture
 ```
 
-Интерактивный режим, который ждёт следующие вопросы в том же диалоге:
+Если запускать из корня, workspace будет самим репозиторием агента:
 
 ```powershell
-$env:AGENT_CONFIG = "$PWD\agent.codex-test.config.json"
-node packages/cli/dist/index.js chat
+cd C:\Projects\2026\tirscript-agent
 ```
 
-Для завершения введите `exit`.
+## Выбор модели
 
-## Контролируемые инструменты
+По умолчанию включён `mock` provider: он не вызывает сеть и возвращает тестовый ответ.
 
-Этап 2 добавляет Policy Engine и инструменты чтения, поиска, атомарного patch с SHA-256 и запуска проверок из allowlist (`pnpm test`, `pnpm run build/check/lint/typecheck`, `git status/diff`, `tsc --noEmit`). Отчёт текущей задачи выводится по флагу `--report`:
+Для временного теста с реальным Codex задайте путь к конфигурации:
 
 ```powershell
-node packages/cli/dist/index.js inspect --report "Опиши структуру проекта"
+$env:AGENT_CONFIG = "C:\Projects\2026\tirscript-agent\agent.codex-test.config.json"
 ```
+
+Эта конфигурация использует локальную авторизацию `codex login`. Она предназначена только для тестовых проектов: запросы и выбранный код отправляются во внешний сервис.
+
+После работы очистите переменную:
+
+```powershell
+Remove-Item Env:AGENT_CONFIG -ErrorAction SilentlyContinue
+```
+
+## Команды
+
+При запуске из `examples\agent-fixture` путь к CLI начинается так:
+
+```powershell
+node ..\..\packages\cli\dist\index.js inspect "Опиши проект"
+```
+
+При запуске из корня путь к CLI начинается так:
+
+```powershell
+node packages\cli\dist\index.js inspect "Опиши проект"
+```
+
+### Вопрос без анализа проекта
+
+```powershell
+node ..\..\packages\cli\dist\index.js ask "Объясни паттерн Strategy"
+```
+
+### Анализ проекта без изменений
+
+```powershell
+node ..\..\packages\cli\dist\index.js inspect "Опиши структуру проекта"
+node ..\..\packages\cli\dist\index.js inspect --report "Найди точки входа"
+```
+
+`--report` выводит план, список изменений, проверки и риски.
+
+### Интерактивный диалог
+
+```powershell
+node ..\..\packages\cli\dist\index.js chat
+```
+
+После запуска появится `You>`. Введите вопрос и нажмите Enter. Для выхода введите `exit`. В рамках одного запуска сохраняется контекст диалога Codex.
+
+### Контролируемое изменение кода
+
+```powershell
+node ..\..\packages\cli\dist\index.js run --report "Добавь функцию createFarewell(name) в src/greeting.js, добавь тест и запусти npm test."
+```
+
+`run` доступен только с `codex-local` тестовой конфигурацией. Модель сначала возвращает JSON-план, затем видит только выбранные существующие файлы с SHA-256. Агент проверяет хеши и применяет patch. На текущем этапе новые файлы не создаются.
+
+Разрешённые проверки: `pnpm test`, `pnpm run build/check/lint/typecheck`, `npm test`, `npm run build/check/lint/typecheck`, `git status`, `git diff`, `tsc --noEmit`.
+
+### Конфигурация
+
+```powershell
+node ..\..\packages\cli\dist\index.js config
+```
+
+Конфигурация читается в таком порядке:
+
+1. путь из `AGENT_CONFIG`;
+2. `.agent/config.json` текущего проекта;
+3. `agent.config.json` в корне текущего проекта;
+4. безопасная конфигурация mock-provider по умолчанию.
+
+Для проекта можно создать `.agent/config.json` на основе [agent.config.example.json](agent.config.example.json). В нём допустимо хранить только несекретные настройки: provider, лимиты, память и правила проекта. Пример есть в [тестовом проекте](examples/agent-fixture/.agent/config.json). Поддержка отдельных profiles и workflows будет добавлена позднее.
+
+### Память и продолжение задачи
+
+История, логи и SQLite-база находятся вне проекта:
+
+```text
+%LOCALAPPDATA%\CorporateAgent\projects\<SHA-256-пути-проекта>\agent.sqlite
+```
+
+При первом запуске старая база `.agent\agent.sqlite` автоматически переносится туда. Каталог `.agent` в самом проекте зарезервирован для переносимых несекретных настроек, профилей и workflows.
+
+```powershell
+node ..\..\packages\cli\dist\index.js history
+node ..\..\packages\cli\dist\index.js status
+```
+
+Для продолжения сначала получите идентификатор из `history`, затем сохраните его в переменную:
+
+```powershell
+$taskId = "вставьте-идентификатор-из-поля-id"
+node ..\..\packages\cli\dist\index.js resume $taskId "Продолжай: проверь результат"
+```
+
+## Границы текущей версии
+
+- `ask`, `inspect`, `chat` не изменяют файлы.
+- `run` меняет только ранее выбранные существующие файлы через hash-checked patch.
+- Чтение `.env`, ключей и сертификатов блокируется.
+- `git push` и destructive-команды блокируются.
+- Полное восстановление оригинального потока Codex после перезапуска пока не реализовано; `resume` использует последний локальный checkpoint.
