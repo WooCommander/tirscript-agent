@@ -28,7 +28,7 @@ node packages/cli/dist/index.js config
 
 ## Временный тест с Codex
 
-`agent.codex-test.config.json` включает внешний provider только для `ask`. Он использует локальную авторизацию `codex login`, запускается в read-only sandbox и отключает web-search. Не используйте его для корпоративного кода или секретов.
+`agent.codex-test.config.json` включает внешний provider для read-only команд `ask` и `inspect`. Он использует локальную авторизацию `codex login`, запускается в read-only sandbox и отключает web-search. Не используйте его для корпоративного кода или секретов.
 
 ```powershell
 $env:AGENT_CONFIG = "$PWD\agent.codex-test.config.json"
@@ -44,3 +44,11 @@ node packages/cli/dist/index.js chat
 ```
 
 Для завершения введите `exit`.
+
+## Контролируемые инструменты
+
+Этап 2 добавляет Policy Engine и инструменты чтения, поиска, атомарного patch с SHA-256 и запуска проверок из allowlist (`pnpm test`, `pnpm run build/check/lint/typecheck`, `git status/diff`, `tsc --noEmit`). Отчёт текущей задачи выводится по флагу `--report`:
+
+```powershell
+node packages/cli/dist/index.js inspect --report "Опиши структуру проекта"
+```

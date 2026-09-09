@@ -1,0 +1,8 @@
+{
+  "name": "@corporate-agent/policy-engine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": { "development": "./src/index.ts", "default": "./dist/index.js" } },
+  "scripts": { "build": "tsc -p tsconfig.json", "check": "tsc -p tsconfig.json --noEmit", "test": "node --test dist/index.test.js" }
+}

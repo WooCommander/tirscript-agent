@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
-import { AgentRuntime, Logger, loadConfig } from "@corporate-agent/core";
+import { AgentRuntime, Logger, formatTaskReport, loadConfig } from "@corporate-agent/core";
 import { CodexLocalProvider, MockModelProvider } from "@corporate-agent/model-provider";
 import type { AgentMode } from "@corporate-agent/protocol";
 
@@ -15,14 +15,16 @@ if (command === "config") {
 } else if (command === "chat") {
   await startChat();
 } else if (command === "ask" || command === "inspect" || command === "run") {
-  const prompt = await readPrompt(args);
+  const showReport = args.includes("--report");
+  const prompt = await readPrompt(args.filter((argument) => argument !== "--report"));
   if (!prompt) fail("Prompt is required");
   const config = await loadConfig(workspace);
   const runtime = createRuntime(config);
   const result = await runtime.execute(command satisfies AgentMode, prompt, workspace, config);
   console.log(result.response);
+  if (showReport) console.log(formatTaskReport(result.report));
 } else {
-  fail("Usage: agent <ask|inspect|run> <prompt|task-file> | agent chat | agent config");
+  fail("Usage: agent <ask|inspect|run> [--report] <prompt|task-file> | agent chat | agent config");
 }
 
 async function startChat(): Promise<void> {

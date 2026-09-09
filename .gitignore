@@ -3,4 +3,6 @@ dist/
 coverage/
 .agent/
 *.log
-
+packages/*/src/*.js
+packages/*/src/*.js.map
+packages/*/src/*.d.ts

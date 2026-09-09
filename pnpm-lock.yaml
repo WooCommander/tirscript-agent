@@ -29,9 +29,15 @@ importers:
 
   packages/core:
     dependencies:
+      '@corporate-agent/policy-engine':
+        specifier: workspace:*
+        version: link:../policy-engine
       '@corporate-agent/protocol':
         specifier: workspace:*
         version: link:../protocol
+      '@corporate-agent/tools':
+        specifier: workspace:*
+        version: link:../tools
 
   packages/model-provider:
     dependencies:
@@ -42,7 +48,15 @@ importers:
         specifier: ^0.153.4
         version: 0.153.4
 
+  packages/policy-engine: {}
+
   packages/protocol: {}
+
+  packages/tools:
+    dependencies:
+      '@corporate-agent/policy-engine':
+        specifier: workspace:*
+        version: link:../policy-engine
 
 packages:
 
