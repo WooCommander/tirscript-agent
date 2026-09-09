@@ -111,6 +111,11 @@ export class MemoryEngine {
       .run(summary.path, summary.sha256, summary.summary, summary.analyzerVersion, summary.updatedAt);
   }
 
+  recordAudit(taskId: string, event: string, details: Readonly<Record<string, unknown>>): void {
+    this.database.prepare("INSERT INTO audit_events (task_id, event, details_json, created_at) VALUES (?, ?, ?, ?)")
+      .run(taskId, event, JSON.stringify(details), timestamp());
+  }
+
   close(): void { this.database.close(); }
 
   private migrate(): void {
@@ -131,6 +136,10 @@ export class MemoryEngine {
       CREATE TABLE IF NOT EXISTS file_summaries (
         path TEXT PRIMARY KEY, sha256 TEXT NOT NULL, summary TEXT NOT NULL,
         analyzer_version TEXT NOT NULL, updated_at TEXT NOT NULL
+      ) STRICT;
+      CREATE TABLE IF NOT EXISTS audit_events (
+        id INTEGER PRIMARY KEY, task_id TEXT NOT NULL, event TEXT NOT NULL,
+        details_json TEXT NOT NULL, created_at TEXT NOT NULL
       ) STRICT;
     `);
   }

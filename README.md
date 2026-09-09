@@ -87,6 +87,8 @@ Remove-Item Env:MY_MODEL_API_KEY -ErrorAction SilentlyContinue
 
 `baseUrl` должен использовать HTTPS, а домен из него должен быть указан в `allowedHosts`. Ключ не сохраняется в конфигурации, SQLite или Git.
 
+`security.deniedFiles` задаёт дополнительные glob-пути, которые агенту запрещено читать и передавать модели. Базовый denylist блокирует `.env`, `.key`, `.pem`, `.pfx` и `.p12`.
+
 DeepSeek:
 
 ```powershell

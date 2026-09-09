@@ -8,7 +8,8 @@
   "security": {
     "isolationMode": "permissive",
     "allowInternet": true,
-    "allowedHosts": ["api.deepseek.com"]
+    "allowedHosts": ["api.deepseek.com"],
+    "deniedFiles": ["**/.env", "**/*.key", "**/*.pem"]
   },
   "execution": {
     "maxIterations": 1,

@@ -13,3 +13,10 @@ test("denies destructive and publishing commands", () => {
   assert.throws(() => policy.assertCommand("git push origin main"), PolicyViolationError);
   assert.throws(() => policy.assertCommand("rm -rf generated"), PolicyViolationError);
 });
+
+test("applies configured denylist and network allowlist", () => {
+  const policy = new PolicyEngine(process.cwd(), { deniedFiles: ["private/**"], allowedHosts: ["models.example"] });
+  assert.throws(() => policy.assertReadable("private/notes.txt"), PolicyViolationError);
+  policy.assertNetworkUrl("https://models.example/v1");
+  assert.throws(() => policy.assertNetworkUrl("https://other.example/v1"), PolicyViolationError);
+});

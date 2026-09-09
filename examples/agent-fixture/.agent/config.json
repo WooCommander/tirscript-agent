@@ -6,7 +6,8 @@
   "security": {
     "isolationMode": "strict",
     "allowInternet": false,
-    "allowedHosts": []
+    "allowedHosts": [],
+    "deniedFiles": ["**/.env", "**/*.key", "**/*.pem"]
   },
   "execution": {
     "maxIterations": 3,

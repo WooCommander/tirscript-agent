@@ -8,7 +8,8 @@
   "security": {
     "isolationMode": "permissive",
     "allowInternet": true,
-    "allowedHosts": ["dashscope-us.aliyuncs.com"]
+    "allowedHosts": ["dashscope-us.aliyuncs.com"],
+    "deniedFiles": ["**/.env", "**/*.key", "**/*.pem"]
   },
   "execution": {
     "maxIterations": 1,
