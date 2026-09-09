@@ -30,8 +30,23 @@ importers:
         specifier: workspace:*
         version: link:../protocol
 
+  packages/context-engine:
+    dependencies:
+      '@corporate-agent/memory-engine':
+        specifier: workspace:*
+        version: link:../memory-engine
+      '@corporate-agent/policy-engine':
+        specifier: workspace:*
+        version: link:../policy-engine
+      '@corporate-agent/tools':
+        specifier: workspace:*
+        version: link:../tools
+
   packages/core:
     dependencies:
+      '@corporate-agent/context-engine':
+        specifier: workspace:*
+        version: link:../context-engine
       '@corporate-agent/memory-engine':
         specifier: workspace:*
         version: link:../memory-engine

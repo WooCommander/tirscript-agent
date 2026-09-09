@@ -15,5 +15,9 @@
   },
   "memory": {
     "enabled": true
+  },
+  "context": {
+    "maxFiles": 4,
+    "maxChars": 12000
   }
 }

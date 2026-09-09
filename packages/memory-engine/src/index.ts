@@ -22,6 +22,15 @@ export interface Checkpoint {
   readonly createdAt: string;
 }
 
+export interface FileIndexEntry {
+  readonly path: string;
+  readonly sha256: string;
+  readonly imports: readonly string[];
+  readonly exports: readonly string[];
+  readonly analyzerVersion: string;
+  readonly updatedAt: string;
+}
+
 export class MemoryEngine {
   private constructor(private readonly database: DatabaseSync) {}
 
@@ -62,6 +71,26 @@ export class MemoryEngine {
     return rows.filter(isTaskRow).map((row) => ({ id: row.id, mode: row.mode, prompt: row.prompt, status: row.status, createdAt: row.created_at, updatedAt: row.updated_at, summary: row.summary }));
   }
 
+  getFileIndex(path: string): FileIndexEntry | null {
+    const row = this.database.prepare("SELECT path, sha256, imports_json, exports_json, analyzer_version, updated_at FROM file_index WHERE path = ?").get(path);
+    return isFileIndexRow(row) ? {
+      path: row.path,
+      sha256: row.sha256,
+      imports: JSON.parse(row.imports_json),
+      exports: JSON.parse(row.exports_json),
+      analyzerVersion: row.analyzer_version,
+      updatedAt: row.updated_at
+    } : null;
+  }
+
+  upsertFileIndex(entry: FileIndexEntry): void {
+    this.database.prepare(`INSERT INTO file_index (path, sha256, imports_json, exports_json, analyzer_version, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(path) DO UPDATE SET sha256 = excluded.sha256, imports_json = excluded.imports_json,
+      exports_json = excluded.exports_json, analyzer_version = excluded.analyzer_version, updated_at = excluded.updated_at`)
+      .run(entry.path, entry.sha256, JSON.stringify(entry.imports), JSON.stringify(entry.exports), entry.analyzerVersion, entry.updatedAt);
+  }
+
   close(): void { this.database.close(); }
 
   private migrate(): void {
@@ -74,6 +103,10 @@ export class MemoryEngine {
         id INTEGER PRIMARY KEY, task_id TEXT NOT NULL, plan_json TEXT NOT NULL,
         state_json TEXT NOT NULL, created_at TEXT NOT NULL,
         FOREIGN KEY(task_id) REFERENCES tasks(id)
+      ) STRICT;
+      CREATE TABLE IF NOT EXISTS file_index (
+        path TEXT PRIMARY KEY, sha256 TEXT NOT NULL, imports_json TEXT NOT NULL,
+        exports_json TEXT NOT NULL, analyzer_version TEXT NOT NULL, updated_at TEXT NOT NULL
       ) STRICT;
     `);
   }
@@ -97,5 +130,8 @@ function isTaskRow(value: unknown): value is { id: string; mode: AgentMode; prom
 }
 function isCheckpointRow(value: unknown): value is { task_id: string; plan_json: string; state_json: string; created_at: string } {
   return isRecord(value) && typeof value.task_id === "string" && typeof value.plan_json === "string" && typeof value.state_json === "string" && typeof value.created_at === "string";
+}
+function isFileIndexRow(value: unknown): value is { path: string; sha256: string; imports_json: string; exports_json: string; analyzer_version: string; updated_at: string } {
+  return isRecord(value) && typeof value.path === "string" && typeof value.sha256 === "string" && typeof value.imports_json === "string" && typeof value.exports_json === "string" && typeof value.analyzer_version === "string" && typeof value.updated_at === "string";
 }
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null; }
