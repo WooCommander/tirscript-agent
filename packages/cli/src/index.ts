@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { AgentRuntime, Logger, formatTaskReport, loadConfig } from "@corporate-agent/core";
-import { CodexLocalProvider, MockModelProvider } from "@corporate-agent/model-provider";
+import { CodexLocalProvider, MockModelProvider, OpenAICompatibleProvider } from "@corporate-agent/model-provider";
 import type { AgentMode } from "@corporate-agent/protocol";
 import { MemoryEngine } from "@corporate-agent/memory-engine";
 
@@ -78,8 +78,15 @@ async function startChat(): Promise<void> {
 function createRuntime(config: Awaited<ReturnType<typeof loadConfig>>): AgentRuntime {
   const provider = config.provider.type === "codex-local"
     ? new CodexLocalProvider(config.provider.model)
-    : new MockModelProvider(config.provider.model);
+    : config.provider.type === "openai-compatible"
+      ? new OpenAICompatibleProvider({ baseUrl: required(config.provider.baseUrl, "baseUrl"), model: config.provider.model, apiKeyEnv: required(config.provider.apiKeyEnv, "apiKeyEnv") })
+      : new MockModelProvider(config.provider.model);
   return new AgentRuntime(provider, new Logger());
+}
+
+function required(value: string | undefined, name: string): string {
+  if (value === undefined) throw new Error(`Missing provider.${name}`);
+  return value;
 }
 
 async function readPrompt(args: readonly string[]): Promise<string> {

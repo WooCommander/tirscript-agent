@@ -32,7 +32,7 @@ export interface ModelProvider {
 }
 
 export interface AgentConfig {
-  readonly provider: { readonly type: "mock" | "codex-local" | "openai-compatible"; readonly model: string; readonly baseUrl?: string };
+  readonly provider: { readonly type: "mock" | "codex-local" | "openai-compatible"; readonly model: string; readonly baseUrl?: string; readonly apiKeyEnv?: string };
   readonly security: { readonly isolationMode: "strict" | "permissive"; readonly allowInternet: boolean; readonly allowedHosts: readonly string[] };
   readonly execution: { readonly maxIterations: number; readonly maxTokens: number; readonly timeoutMs: number };
   readonly memory?: { readonly enabled: boolean };

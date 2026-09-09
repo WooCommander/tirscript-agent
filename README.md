@@ -48,6 +48,67 @@ $env:AGENT_CONFIG = "C:\Projects\2026\tirscript-agent\agent.codex-test.config.js
 Remove-Item Env:AGENT_CONFIG -ErrorAction SilentlyContinue
 ```
 
+### Внешние Qwen и DeepSeek
+
+Оба примера используют OpenAI-совместимый API. Секрет передаётся только через переменную окружения, а не попадает в конфигурацию или Git. Для первого теста используйте `ask` или `inspect`; `run` с внешним provider пока заблокирован.
+
+### Универсальное подключение по URL и API-ключу
+
+Любой OpenAI-совместимый сервис подключается через `.agent/config.json` в workspace:
+
+```json
+{
+  "provider": {
+    "type": "openai-compatible",
+    "baseUrl": "https://ваш-api-endpoint/v1",
+    "apiKeyEnv": "MY_MODEL_API_KEY",
+    "model": "имя-модели"
+  },
+  "security": {
+    "isolationMode": "permissive",
+    "allowInternet": true,
+    "allowedHosts": ["ваш-api-endpoint"]
+  },
+  "execution": {
+    "maxIterations": 1,
+    "maxTokens": 8000,
+    "timeoutMs": 120000
+  }
+}
+```
+
+`apiKeyEnv` — это имя переменной окружения, а не ключ. Перед запуском передайте ключ только процессу PowerShell:
+
+```powershell
+$env:MY_MODEL_API_KEY = "ваш-api-ключ"
+node ..\..\packages\cli\dist\index.js ask "Привет"
+Remove-Item Env:MY_MODEL_API_KEY -ErrorAction SilentlyContinue
+```
+
+`baseUrl` должен использовать HTTPS, а домен из него должен быть указан в `allowedHosts`. Ключ не сохраняется в конфигурации, SQLite или Git.
+
+DeepSeek:
+
+```powershell
+$env:DEEPSEEK_API_KEY = "вставьте-свой-ключ"
+$env:AGENT_CONFIG = "C:\Projects\2026\tirscript-agent\agent.deepseek-test.example.json"
+node ..\..\packages\cli\dist\index.js ask "Ответь одной фразой: подключение работает"
+Remove-Item Env:DEEPSEEK_API_KEY
+Remove-Item Env:AGENT_CONFIG
+```
+
+Qwen Model Studio US (ключ должен принадлежать тому же региону):
+
+```powershell
+$env:DASHSCOPE_API_KEY = "вставьте-свой-ключ"
+$env:AGENT_CONFIG = "C:\Projects\2026\tirscript-agent\agent.qwen-test.example.json"
+node ..\..\packages\cli\dist\index.js ask "Ответь одной фразой: подключение работает"
+Remove-Item Env:DASHSCOPE_API_KEY
+Remove-Item Env:AGENT_CONFIG
+```
+
+Для Qwen замените `baseUrl` и `allowedHosts` на свой региональный endpoint при необходимости. Ключ Model Studio привязан к региону endpoint.
+
 ## Команды
 
 При запуске из `examples\agent-fixture` путь к CLI начинается так:
@@ -111,6 +172,8 @@ node ..\..\packages\cli\dist\index.js config
 Для проекта можно создать `.agent/config.json` на основе [agent.config.example.json](agent.config.example.json). В нём допустимо хранить только несекретные настройки: provider, лимиты, память и правила проекта. Пример есть в [тестовом проекте](examples/agent-fixture/.agent/config.json). Поддержка отдельных profiles и workflows будет добавлена позднее.
 
 Блок `context` ограничивает объём данных, передаваемых модели: `maxFiles` — число релевантных файлов, `maxChars` — общий объём их текста. По умолчанию используются 6 файлов и 30 000 символов.
+
+Перед полным текстом выбранных файлов агент передаёт компактную карту репозитория: путь, импорты и экспорты. Она кешируется локально и обновляется только при изменении SHA-256 файла.
 
 ### Память и продолжение задачи
 

@@ -31,6 +31,14 @@ export interface FileIndexEntry {
   readonly updatedAt: string;
 }
 
+export interface FileSummary {
+  readonly path: string;
+  readonly sha256: string;
+  readonly summary: string;
+  readonly analyzerVersion: string;
+  readonly updatedAt: string;
+}
+
 export class MemoryEngine {
   private constructor(private readonly database: DatabaseSync) {}
 
@@ -91,6 +99,18 @@ export class MemoryEngine {
       .run(entry.path, entry.sha256, JSON.stringify(entry.imports), JSON.stringify(entry.exports), entry.analyzerVersion, entry.updatedAt);
   }
 
+  getFileSummary(path: string, sha256: string): FileSummary | null {
+    const row = this.database.prepare("SELECT path, sha256, summary, analyzer_version, updated_at FROM file_summaries WHERE path = ? AND sha256 = ?").get(path, sha256);
+    return isFileSummaryRow(row) ? { path: row.path, sha256: row.sha256, summary: row.summary, analyzerVersion: row.analyzer_version, updatedAt: row.updated_at } : null;
+  }
+
+  upsertFileSummary(summary: FileSummary): void {
+    this.database.prepare(`INSERT INTO file_summaries (path, sha256, summary, analyzer_version, updated_at) VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(path) DO UPDATE SET sha256 = excluded.sha256, summary = excluded.summary,
+      analyzer_version = excluded.analyzer_version, updated_at = excluded.updated_at`)
+      .run(summary.path, summary.sha256, summary.summary, summary.analyzerVersion, summary.updatedAt);
+  }
+
   close(): void { this.database.close(); }
 
   private migrate(): void {
@@ -107,6 +127,10 @@ export class MemoryEngine {
       CREATE TABLE IF NOT EXISTS file_index (
         path TEXT PRIMARY KEY, sha256 TEXT NOT NULL, imports_json TEXT NOT NULL,
         exports_json TEXT NOT NULL, analyzer_version TEXT NOT NULL, updated_at TEXT NOT NULL
+      ) STRICT;
+      CREATE TABLE IF NOT EXISTS file_summaries (
+        path TEXT PRIMARY KEY, sha256 TEXT NOT NULL, summary TEXT NOT NULL,
+        analyzer_version TEXT NOT NULL, updated_at TEXT NOT NULL
       ) STRICT;
     `);
   }
@@ -133,5 +157,8 @@ function isCheckpointRow(value: unknown): value is { task_id: string; plan_json:
 }
 function isFileIndexRow(value: unknown): value is { path: string; sha256: string; imports_json: string; exports_json: string; analyzer_version: string; updated_at: string } {
   return isRecord(value) && typeof value.path === "string" && typeof value.sha256 === "string" && typeof value.imports_json === "string" && typeof value.exports_json === "string" && typeof value.analyzer_version === "string" && typeof value.updated_at === "string";
+}
+function isFileSummaryRow(value: unknown): value is { path: string; sha256: string; summary: string; analyzer_version: string; updated_at: string } {
+  return isRecord(value) && typeof value.path === "string" && typeof value.sha256 === "string" && typeof value.summary === "string" && typeof value.analyzer_version === "string" && typeof value.updated_at === "string";
 }
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null; }

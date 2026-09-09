@@ -70,3 +70,50 @@ export class CodexLocalProvider implements ModelProvider {
     });
   }
 }
+
+export class OpenAICompatibleProvider implements ModelProvider {
+  readonly name = "openai-compatible";
+
+  constructor(private readonly options: { readonly baseUrl: string; readonly model: string; readonly apiKeyEnv: string }) {}
+
+  capabilities(): ModelCapabilities {
+    return { streaming: false, tokenCounting: true, cancellation: true };
+  }
+
+  async generate(request: ModelRequest): Promise<ModelResponse> {
+    if (request.mode === "run") throw new Error("openai-compatible provider supports ask, inspect and resume; controlled run requires a validated patch schema");
+    const apiKey = process.env[this.options.apiKeyEnv];
+    if (!apiKey) throw new Error(`Missing API key environment variable: ${this.options.apiKeyEnv}`);
+    const endpoint = new URL("chat/completions", withTrailingSlash(this.options.baseUrl));
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: this.options.model,
+        messages: [
+          { role: "system", content: request.systemInstructions.join("\n") },
+          { role: "user", content: request.prompt }
+        ],
+        stream: false
+      }),
+      ...(request.signal === undefined ? {} : { signal: request.signal })
+    });
+    const payload: unknown = await response.json();
+    if (!response.ok) throw new Error(`Model request failed with HTTP ${response.status}: ${errorText(payload)}`);
+    const parsed = parseCompletion(payload);
+    return { text: parsed.text, model: this.options.model, ...(parsed.inputTokens === undefined ? {} : { inputTokens: parsed.inputTokens }), ...(parsed.outputTokens === undefined ? {} : { outputTokens: parsed.outputTokens }) };
+  }
+}
+
+function parseCompletion(value: unknown): { readonly text: string; readonly inputTokens?: number; readonly outputTokens?: number } {
+  if (!isRecord(value) || !Array.isArray(value.choices) || !isRecord(value.choices[0]) || !isRecord(value.choices[0].message) || typeof value.choices[0].message.content !== "string") throw new Error("Model response has no text completion");
+  const usage = isRecord(value.usage) ? value.usage : null;
+  return {
+    text: value.choices[0].message.content,
+    ...(typeof usage?.prompt_tokens === "number" ? { inputTokens: usage.prompt_tokens } : {}),
+    ...(typeof usage?.completion_tokens === "number" ? { outputTokens: usage.completion_tokens } : {})
+  };
+}
+function errorText(value: unknown): string { return isRecord(value) && isRecord(value.error) && typeof value.error.message === "string" ? value.error.message : "unknown error"; }
+function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null; }
+function withTrailingSlash(url: string): string { return url.endsWith("/") ? url : `${url}/`; }

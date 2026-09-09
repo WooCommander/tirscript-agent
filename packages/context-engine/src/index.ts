@@ -14,7 +14,13 @@ export interface ContextFile {
   readonly sha256: string;
   readonly imports: readonly string[];
   readonly exports: readonly string[];
+  readonly summary: string;
   readonly content: string;
+}
+
+export interface PreparedContext {
+  readonly repositoryMap: readonly string[];
+  readonly files: readonly ContextFile[];
 }
 
 export interface IndexResult {
@@ -57,10 +63,38 @@ export class ContextEngine {
     for (const entry of ranked) {
       if (selected.length >= budget.maxFiles || remainingChars <= 0) break;
       const content = await this.tools.readText(entry.path, remainingChars);
-      selected.push({ path: entry.path, sha256: entry.sha256, imports: entry.imports, exports: entry.exports, content });
+      selected.push({ path: entry.path, sha256: entry.sha256, imports: entry.imports, exports: entry.exports, summary: this.summaryFor(entry), content });
       remainingChars -= content.length;
     }
     return selected;
+  }
+
+  async prepare(query: string, budget: ContextBudget): Promise<PreparedContext> {
+    const index = await this.index();
+    const files = await this.selectFromIndex(query, budget, index.entries);
+    return { repositoryMap: index.entries.map((entry) => this.summaryFor(entry)), files };
+  }
+
+  private async selectFromIndex(query: string, budget: ContextBudget, entries: readonly FileIndexEntry[]): Promise<readonly ContextFile[]> {
+    const terms = query.toLowerCase().split(/[^\p{L}\p{N}_-]+/u).filter((term) => term.length >= 3);
+    const ranked = [...entries].sort((left, right) => score(right, terms) - score(left, terms) || left.path.localeCompare(right.path));
+    const selected: ContextFile[] = [];
+    let remainingChars = budget.maxChars;
+    for (const entry of ranked) {
+      if (selected.length >= budget.maxFiles || remainingChars <= 0) break;
+      const content = await this.tools.readText(entry.path, remainingChars);
+      selected.push({ path: entry.path, sha256: entry.sha256, imports: entry.imports, exports: entry.exports, summary: this.summaryFor(entry), content });
+      remainingChars -= content.length;
+    }
+    return selected;
+  }
+
+  private summaryFor(entry: FileIndexEntry): string {
+    const cached = this.memory?.getFileSummary(entry.path, entry.sha256);
+    if (cached?.analyzerVersion === analyzerVersion) return cached.summary;
+    const summary = `${entry.path}: exports [${entry.exports.join(", ") || "none"}], imports [${entry.imports.join(", ") || "none"}]`;
+    this.memory?.upsertFileSummary({ path: entry.path, sha256: entry.sha256, summary, analyzerVersion, updatedAt: new Date().toISOString() });
+    return summary;
   }
 }
 
