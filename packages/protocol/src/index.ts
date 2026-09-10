@@ -1,5 +1,13 @@
 export type AgentMode = "ask" | "inspect" | "run" | "diagnose" | "review" | "resume";
 export type TaskStatus = "planned" | "running" | "completed" | "failed" | "stopped";
+export type ProviderType = "mock" | "codex-local" | "openai-compatible";
+
+export interface ProviderConfig {
+  readonly type: ProviderType;
+  readonly model: string;
+  readonly baseUrl?: string;
+  readonly apiKeyEnv?: string;
+}
 
 export interface ModelCapabilities {
   readonly streaming: boolean;
@@ -32,7 +40,8 @@ export interface ModelProvider {
 }
 
 export interface AgentConfig {
-  readonly provider: { readonly type: "mock" | "codex-local" | "openai-compatible"; readonly model: string; readonly baseUrl?: string; readonly apiKeyEnv?: string };
+  readonly provider: ProviderConfig;
+  readonly routing?: { readonly providers: Readonly<Record<string, ProviderConfig>>; readonly roles: Partial<Record<AgentMode, string>> };
   readonly security: { readonly isolationMode: "strict" | "permissive"; readonly allowInternet: boolean; readonly allowedHosts: readonly string[]; readonly deniedFiles?: readonly string[] };
   readonly execution: { readonly maxIterations: number; readonly maxTokens: number; readonly timeoutMs: number };
   readonly memory?: { readonly enabled: boolean };

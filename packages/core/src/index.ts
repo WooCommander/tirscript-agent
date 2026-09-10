@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { AgentConfig, AgentMode, AgentTask, ModelProvider } from "@corporate-agent/protocol";
+import type { AgentConfig, AgentMode, AgentTask, ModelProvider, ProviderConfig } from "@corporate-agent/protocol";
 import { PolicyEngine } from "@corporate-agent/policy-engine";
 import { type CommandSpec, type PatchOperation, WorkspaceTools } from "@corporate-agent/tools";
 import { MemoryEngine } from "@corporate-agent/memory-engine";
@@ -254,8 +254,6 @@ function formatContext(files: readonly ContextFile[]): string {
 
 function validateConfig(value: unknown): AgentConfig {
   if (!isRecord(value)) throw new Error("configuration must be an object");
-  const provider = value.provider;
-  if (!isRecord(provider) || (provider.type !== "mock" && provider.type !== "codex-local" && provider.type !== "openai-compatible") || typeof provider.model !== "string") throw new Error("provider.type and provider.model are required");
   const security = value.security;
   const execution = value.execution;
   const context = value.context;
@@ -268,14 +266,11 @@ function validateConfig(value: unknown): AgentConfig {
   if (context !== undefined && (!isRecord(context) || !isPositiveInteger(context.maxFiles) || !isPositiveInteger(context.maxChars))) {
     throw new Error("context.maxFiles and context.maxChars must be positive integers");
   }
-  if ((provider.type === "codex-local" || provider.type === "openai-compatible") && (security.isolationMode !== "permissive" || security.allowInternet !== true)) {
-    throw new Error(`${provider.type} requires an explicit permissive test configuration with allowInternet=true`);
-  }
-  if (provider.type === "openai-compatible" && (typeof provider.baseUrl !== "string" || typeof provider.apiKeyEnv !== "string" || !isAllowedProviderHost(provider.baseUrl, security.allowedHosts))) {
-    throw new Error("openai-compatible provider requires baseUrl, apiKeyEnv and an allowed host");
-  }
+  const primaryProvider = validateProvider(value.provider, security);
+  const routing = validateRouting(value.routing, security);
   return {
-    provider: { type: provider.type, model: provider.model, ...(typeof provider.baseUrl === "string" ? { baseUrl: provider.baseUrl } : {}), ...(typeof provider.apiKeyEnv === "string" ? { apiKeyEnv: provider.apiKeyEnv } : {}) },
+    provider: primaryProvider,
+    ...(routing === undefined ? {} : { routing }),
     security: { isolationMode: security.isolationMode, allowInternet: security.allowInternet, allowedHosts: security.allowedHosts, ...(isStringArray(security.deniedFiles) ? { deniedFiles: security.deniedFiles } : {}) },
     execution: { maxIterations: execution.maxIterations, maxTokens: execution.maxTokens, timeoutMs: execution.timeoutMs },
     memory: isRecord(value.memory) && typeof value.memory.enabled === "boolean" ? { enabled: value.memory.enabled } : { enabled: true },
@@ -283,9 +278,34 @@ function validateConfig(value: unknown): AgentConfig {
   };
 }
 
+function validateProvider(value: unknown, security: Record<string, unknown>): ProviderConfig {
+  if (!isRecord(value) || (value.type !== "mock" && value.type !== "codex-local" && value.type !== "openai-compatible") || typeof value.model !== "string") throw new Error("provider.type and provider.model are required");
+  if ((value.type === "codex-local" || value.type === "openai-compatible") && (security.isolationMode !== "permissive" || security.allowInternet !== true)) {
+    throw new Error(`${value.type} requires an explicit permissive test configuration with allowInternet=true`);
+  }
+  if (value.type === "openai-compatible" && (typeof value.baseUrl !== "string" || typeof value.apiKeyEnv !== "string" || !isStringArray(security.allowedHosts) || !isAllowedProviderHost(value.baseUrl, security.allowedHosts))) {
+    throw new Error("openai-compatible provider requires baseUrl, apiKeyEnv and an allowed host");
+  }
+  return { type: value.type, model: value.model, ...(typeof value.baseUrl === "string" ? { baseUrl: value.baseUrl } : {}), ...(typeof value.apiKeyEnv === "string" ? { apiKeyEnv: value.apiKeyEnv } : {}) };
+}
+
+function validateRouting(value: unknown, security: Record<string, unknown>): AgentConfig["routing"] | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value) || !isRecord(value.providers) || !isRecord(value.roles)) throw new Error("routing.providers and routing.roles are required");
+  const providers: Record<string, ProviderConfig> = {};
+  for (const [name, provider] of Object.entries(value.providers)) providers[name] = validateProvider(provider, security);
+  const roles: Partial<Record<AgentMode, string>> = {};
+  for (const [role, providerName] of Object.entries(value.roles)) {
+    if (!isAgentMode(role) || typeof providerName !== "string" || providers[providerName] === undefined) throw new Error("routing role references an unknown provider");
+    roles[role] = providerName;
+  }
+  return { providers, roles };
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null; }
 function isStringArray(value: unknown): value is string[] { return Array.isArray(value) && value.every((item) => typeof item === "string"); }
 function isPositiveInteger(value: unknown): value is number { return typeof value === "number" && Number.isSafeInteger(value) && value > 0; }
+function isAgentMode(value: string): value is AgentMode { return value === "ask" || value === "inspect" || value === "run" || value === "diagnose" || value === "review" || value === "resume"; }
 function isAllowedProviderHost(baseUrl: string, allowedHosts: readonly string[]): boolean {
   try { return new URL(baseUrl).protocol === "https:" && allowedHosts.includes(new URL(baseUrl).host); }
   catch { return false; }

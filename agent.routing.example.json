@@ -1,0 +1,45 @@
+{
+  "provider": {
+    "type": "mock",
+    "model": "corporate-agent-test-model"
+  },
+  "routing": {
+    "providers": {
+      "codex": {
+        "type": "codex-local",
+        "model": "gpt-5.6-terra"
+      },
+      "qwen": {
+        "type": "openai-compatible",
+        "baseUrl": "https://dashscope-us.aliyuncs.com/compatible-mode/v1",
+        "apiKeyEnv": "DASHSCOPE_API_KEY",
+        "model": "qwen-plus"
+      },
+      "deepseek": {
+        "type": "openai-compatible",
+        "baseUrl": "https://api.deepseek.com",
+        "apiKeyEnv": "DEEPSEEK_API_KEY",
+        "model": "deepseek-v4-pro"
+      }
+    },
+    "roles": {
+      "ask": "qwen",
+      "inspect": "deepseek",
+      "run": "codex",
+      "resume": "codex"
+    }
+  },
+  "security": {
+    "isolationMode": "permissive",
+    "allowInternet": true,
+    "allowedHosts": ["dashscope-us.aliyuncs.com", "api.deepseek.com"],
+    "deniedFiles": ["**/.env", "**/*.key", "**/*.pem"]
+  },
+  "execution": {
+    "maxIterations": 3,
+    "maxTokens": 12000,
+    "timeoutMs": 120000
+  },
+  "memory": { "enabled": true },
+  "context": { "maxFiles": 4, "maxChars": 12000 }
+}

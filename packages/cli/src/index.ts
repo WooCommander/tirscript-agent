@@ -5,7 +5,7 @@ import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { AgentRuntime, Logger, formatTaskReport, loadConfig } from "@corporate-agent/core";
 import { CodexLocalProvider, MockModelProvider, OpenAICompatibleProvider } from "@corporate-agent/model-provider";
-import type { AgentMode } from "@corporate-agent/protocol";
+import type { AgentMode, ProviderConfig } from "@corporate-agent/protocol";
 import { MemoryEngine } from "@corporate-agent/memory-engine";
 
 const [command, ...args] = process.argv.slice(2);
@@ -21,10 +21,11 @@ if (command === "config") {
   await startChat();
 } else if (command === "ask" || command === "inspect" || command === "run") {
   const showReport = args.includes("--report");
-  const prompt = await readPrompt(args.filter((argument) => argument !== "--report"));
+  const parsed = parseModelOption(args.filter((argument) => argument !== "--report"));
+  const prompt = await readPrompt(parsed.args);
   if (!prompt) fail("Prompt is required");
   const config = await loadConfig(workspace);
-  const runtime = createRuntime(config);
+  const runtime = createRuntime(config, command, parsed.model);
   const result = await runtime.execute(command satisfies AgentMode, prompt, workspace, config);
   console.log(result.response);
   if (showReport) console.log(formatTaskReport(result.report));
@@ -50,13 +51,13 @@ async function resumeTask(args: readonly string[]): Promise<void> {
   memory.close();
   if (checkpoint === null) fail(`Checkpoint not found for task: ${taskId}`);
   const config = await loadConfig(workspace);
-  const result = await createRuntime(config).execute("resume", `Continue from trusted checkpoint:\n${JSON.stringify(checkpoint.state)}\n\nNew instruction:\n${prompt}`, workspace, config);
+  const result = await createRuntime(config, "resume").execute("resume", `Continue from trusted checkpoint:\n${JSON.stringify(checkpoint.state)}\n\nNew instruction:\n${prompt}`, workspace, config);
   console.log(result.response);
 }
 
 async function startChat(): Promise<void> {
   const config = await loadConfig(workspace);
-  const runtime = createRuntime(config);
+  const runtime = createRuntime(config, "ask");
   const terminal = createInterface({ input: stdin, output: stdout });
   console.log("Agent chat started. Type exit to stop.");
   try {
@@ -76,13 +77,30 @@ async function startChat(): Promise<void> {
   }
 }
 
-function createRuntime(config: Awaited<ReturnType<typeof loadConfig>>): AgentRuntime {
-  const provider = config.provider.type === "codex-local"
-    ? new CodexLocalProvider(config.provider.model)
-    : config.provider.type === "openai-compatible"
-      ? new OpenAICompatibleProvider({ baseUrl: required(config.provider.baseUrl, "baseUrl"), model: config.provider.model, apiKeyEnv: required(config.provider.apiKeyEnv, "apiKeyEnv") })
-      : new MockModelProvider(config.provider.model);
+function createRuntime(config: Awaited<ReturnType<typeof loadConfig>>, mode: AgentMode, override?: string): AgentRuntime {
+  const selected = selectProvider(config, mode, override);
+  const provider = selected.type === "codex-local"
+    ? new CodexLocalProvider(selected.model)
+    : selected.type === "openai-compatible"
+      ? new OpenAICompatibleProvider({ baseUrl: required(selected.baseUrl, "baseUrl"), model: selected.model, apiKeyEnv: required(selected.apiKeyEnv, "apiKeyEnv") })
+      : new MockModelProvider(selected.model);
   return new AgentRuntime(provider, new Logger());
+}
+
+function selectProvider(config: Awaited<ReturnType<typeof loadConfig>>, mode: AgentMode, override?: string): ProviderConfig {
+  const name = override ?? config.routing?.roles[mode];
+  if (name === undefined) return config.provider;
+  const provider = config.routing?.providers[name];
+  if (provider === undefined) throw new Error(`Unknown routed provider: ${name}`);
+  return provider;
+}
+
+function parseModelOption(args: readonly string[]): { readonly model?: string; readonly args: readonly string[] } {
+  const position = args.indexOf("--model");
+  if (position < 0) return { args };
+  const model = args[position + 1];
+  if (model === undefined) fail("--model requires a configured provider name");
+  return { model, args: args.filter((_, index) => index !== position && index !== position + 1) };
 }
 
 function required(value: string | undefined, name: string): string {

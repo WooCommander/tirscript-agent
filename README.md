@@ -111,6 +111,27 @@ Remove-Item Env:AGENT_CONFIG
 
 Для Qwen замените `baseUrl` и `allowedHosts` на свой региональный endpoint при необходимости. Ключ Model Studio привязан к региону endpoint.
 
+### Маршрутизация между моделями
+
+[agent.routing.example.json](agent.routing.example.json) показывает одновременную настройку Codex, Qwen и DeepSeek. В `routing.roles` указывается provider для каждого режима:
+
+```json
+"roles": {
+  "ask": "qwen",
+  "inspect": "deepseek",
+  "run": "codex",
+  "resume": "codex"
+}
+```
+
+Чтобы временно выбрать provider из `routing.providers`, используйте `--model`:
+
+```powershell
+node ..\..\packages\cli\dist\index.js ask --model deepseek "Ответь одной фразой"
+```
+
+Если для выбранного внешнего provider нет ключа в переменной окружения, агент завершится до отправки запроса с понятной ошибкой.
+
 ## Команды
 
 При запуске из `examples\agent-fixture` путь к CLI начинается так:
