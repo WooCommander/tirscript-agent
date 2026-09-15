@@ -72,15 +72,40 @@ export class WorkspaceTools {
   async applyPatches(operations: readonly PatchOperation[]): Promise<readonly AppliedPatch[]> {
     if (operations.length === 0) return [];
     if (operations.length > 30) throw new Error("Patch operation limit exceeded");
+    const paths = new Set<string>();
+    for (const operation of operations) {
+      if (paths.has(operation.path)) throw new Error(`Duplicate patch target: ${operation.path}`);
+      paths.add(operation.path);
+    }
     const validated = await Promise.all(operations.map((operation) => this.validatePatch(operation)));
-    const applied: AppliedPatch[] = [];
-    for (const operation of validated) {
+    const staged = await Promise.all(validated.map(async (operation) => {
       const temporaryPath = join(dirname(operation.absolutePath), `.${basename(operation.absolutePath)}.agent-${randomUUID()}.tmp`);
       await writeFile(temporaryPath, operation.content, "utf8");
-      await rename(temporaryPath, operation.absolutePath);
-      applied.push({ path: operation.path, previousSha256: operation.currentHash, nextSha256: hash(operation.content) });
+      return { ...operation, temporaryPath };
+    }));
+    const replaced: typeof staged = [];
+    try {
+      for (const operation of staged) {
+        await rename(operation.temporaryPath, operation.absolutePath);
+        replaced.push(operation);
+      }
+    } catch (error: unknown) {
+      const rollbackErrors: string[] = [];
+      for (const operation of replaced.reverse()) {
+        try {
+          if (operation.currentHash === null) await rm(operation.absolutePath, { force: true });
+          else {
+            if (operation.previousContent === null) throw new Error("Missing backup content for rollback");
+            await writeFile(operation.absolutePath, operation.previousContent, "utf8");
+          }
+        } catch (rollbackError: unknown) { rollbackErrors.push(`${operation.path}: ${errorMessage(rollbackError)}`); }
+      }
+      if (rollbackErrors.length > 0) throw new Error(`Patch application failed and rollback was incomplete: ${rollbackErrors.join(", ")}`, { cause: error });
+      throw new Error("Patch application failed; all applied changes were rolled back", { cause: error });
+    } finally {
+      await Promise.all(staged.map(async ({ temporaryPath }) => { await rm(temporaryPath, { force: true }); }));
     }
-    return applied;
+    return staged.map((operation) => ({ path: operation.path, previousSha256: operation.currentHash, nextSha256: hash(operation.content) }));
   }
 
   async runCommand(spec: CommandSpec): Promise<CommandResult> {
@@ -98,20 +123,22 @@ export class WorkspaceTools {
     });
   }
 
-  private async validatePatch(operation: PatchOperation): Promise<{ readonly path: string; readonly absolutePath: string; readonly currentHash: string | null; readonly content: string }> {
+  private async validatePatch(operation: PatchOperation): Promise<{ readonly path: string; readonly absolutePath: string; readonly currentHash: string | null; readonly previousContent: string | null; readonly content: string }> {
     if (!operation.path || operation.content.length > 1_000_000) throw new Error("Invalid patch operation");
     const absolutePath = this.policy.assertWritable(operation.path);
     let currentHash: string | null = null;
+    let previousContent: string | null = null;
     try {
       const stats = await lstat(absolutePath);
       if (stats.isSymbolicLink() || !stats.isFile()) throw new Error("Patch target must be a regular file");
-      currentHash = hash(await readFile(absolutePath, "utf8"));
+      previousContent = await readFile(absolutePath, "utf8");
+      currentHash = hash(previousContent);
     } catch (error: unknown) {
       if (!isMissingFileError(error)) throw error;
       await mkdir(dirname(absolutePath), { recursive: true });
     }
     if (currentHash !== operation.expectedSha256) throw new Error(`Patch source hash mismatch: ${operation.path}`);
-    return { path: operation.path, absolutePath, currentHash, content: operation.content };
+    return { path: operation.path, absolutePath, currentHash, previousContent, content: operation.content };
   }
 
   private assertAllowedCommand(spec: CommandSpec): void {
@@ -147,3 +174,4 @@ export class WorkspaceTools {
 function hash(content: string): string { return createHash("sha256").update(content, "utf8").digest("hex"); }
 function appendOutput(current: string, next: string): string { return `${current}${next}`.slice(-32_000); }
 function isMissingFileError(error: unknown): error is NodeJS.ErrnoException { return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT"; }
+function errorMessage(error: unknown): string { return error instanceof Error ? error.message : String(error); }
