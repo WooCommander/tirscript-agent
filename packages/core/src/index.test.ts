@@ -101,3 +101,34 @@ test("resume falls back to a text checkpoint when no session was recorded", asyn
   assert.match(resumeRequest?.prompt ?? "", /continue please/);
   await rm(workspace, { recursive: true, force: true });
 });
+
+test("loads AGENTS.md project rules into the model's system instructions before execution", async () => {
+  const workspace = join(tmpdir(), `agent-project-rules-${Date.now()}`);
+  await mkdir(workspace);
+  await writeFile(join(workspace, "AGENTS.md"), "# Rules\n- Never use any.", "utf8");
+  const config: AgentConfig = {
+    provider: { type: "mock", model: "test" },
+    security: { isolationMode: "strict", allowInternet: false, allowedHosts: [] },
+    execution: { maxIterations: 1, maxTokens: 1000, timeoutMs: 10_000 }
+  };
+  const provider = new RecordingProvider();
+  const runtime = new AgentRuntime(provider, new Logger());
+  await runtime.execute("ask", "hello", workspace, config);
+  assert.match(provider.requests[0]?.systemInstructions.join("\n") ?? "", /Never use any\./);
+  await rm(workspace, { recursive: true, force: true });
+});
+
+test("does not fail and adds no project-rules instruction when AGENTS.md is absent", async () => {
+  const workspace = join(tmpdir(), `agent-no-project-rules-${Date.now()}`);
+  await mkdir(workspace);
+  const config: AgentConfig = {
+    provider: { type: "mock", model: "test" },
+    security: { isolationMode: "strict", allowInternet: false, allowedHosts: [] },
+    execution: { maxIterations: 1, maxTokens: 1000, timeoutMs: 10_000 }
+  };
+  const provider = new RecordingProvider();
+  const runtime = new AgentRuntime(provider, new Logger());
+  await runtime.execute("ask", "hello", workspace, config);
+  assert.deepEqual(provider.requests[0]?.systemInstructions, ["Do not modify files or run commands. Answer the user request directly."]);
+  await rm(workspace, { recursive: true, force: true });
+});

@@ -86,12 +86,13 @@ export class AgentRuntime {
       this.logger.info("tool.listFiles", { taskId: task.id, count: inspectedFiles.length });
       memory?.recordAudit(task.id, "tool.listFiles", { count: inspectedFiles.length });
     }
+    const projectRules = await this.loadProjectRules(workspace);
     const result = await this.provider.generate({
       taskId: task.id,
       mode,
       prompt: `${prompt}${projectContext}`,
       workspace,
-      systemInstructions: ["Do not modify files or run commands. Answer the user request directly."],
+      systemInstructions: this.mergeInstructions(projectRules, ["Do not modify files or run commands. Answer the user request directly."]),
       maxTokens: config.execution.maxTokens
     });
     this.logger.info("task.completed", { taskId: task.id, model: result.model, inputTokens: result.inputTokens, outputTokens: result.outputTokens });
@@ -128,12 +129,13 @@ export class AgentRuntime {
       const composedPrompt = stored.sessionId !== null || checkpoint === null
         ? prompt
         : `Continue from trusted checkpoint:\n${JSON.stringify(checkpoint.state)}\n\nNew instruction:\n${prompt}`;
+      const projectRules = await this.loadProjectRules(workspace);
       const result = await this.provider.generate({
         taskId,
         mode: "resume",
         prompt: composedPrompt,
         workspace,
-        systemInstructions: ["Continue the prior conversation for this task. Do not modify files or run commands. Answer the user request directly."],
+        systemInstructions: this.mergeInstructions(projectRules, ["Continue the prior conversation for this task. Do not modify files or run commands. Answer the user request directly."]),
         maxTokens: config.execution.maxTokens,
         ...(stored.sessionId === null ? {} : { sessionId: stored.sessionId })
       });
@@ -232,18 +234,33 @@ export class AgentRuntime {
   }
 
   private async generateJson(task: AgentTask, config: AgentConfig, outputSchema: unknown, instructions: readonly string[], prompt: string, memory: MemoryEngine | null): Promise<unknown> {
+    const projectRules = await this.loadProjectRules(task.workspace);
     const response = await this.provider.generate({
       taskId: task.id,
       mode: "run",
       prompt,
       workspace: task.workspace,
-      systemInstructions: instructions,
+      systemInstructions: this.mergeInstructions(projectRules, instructions),
       maxTokens: config.execution.maxTokens,
       outputSchema
     });
     this.persistSessionId(memory, task.id, response.sessionId);
     try { return JSON.parse(response.text) as unknown; }
     catch { throw new Error("Model returned invalid JSON for a controlled run step"); }
+  }
+
+  private async loadProjectRules(workspace: string): Promise<string | null> {
+    try {
+      const content = (await readFile(join(workspace, "AGENTS.md"), "utf8")).trim();
+      return content.length === 0 ? null : content;
+    } catch (error: unknown) {
+      if (isMissingFileError(error)) return null;
+      throw error;
+    }
+  }
+
+  private mergeInstructions(projectRules: string | null, instructions: readonly string[]): readonly string[] {
+    return projectRules === null ? instructions : [`Project rules (AGENTS.md):\n${projectRules}`, ...instructions];
   }
 }
 
