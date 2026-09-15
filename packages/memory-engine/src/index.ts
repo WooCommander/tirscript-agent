@@ -13,6 +13,7 @@ export interface StoredTask {
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly summary: string | null;
+  readonly sessionId: string | null;
 }
 
 export interface Checkpoint {
@@ -69,6 +70,19 @@ export class MemoryEngine {
       .run(status, summary, timestamp(), taskId);
   }
 
+  setSessionId(taskId: string, sessionId: string): void {
+    this.database.prepare("UPDATE tasks SET session_id = ?, updated_at = ? WHERE id = ?")
+      .run(sessionId, timestamp(), taskId);
+  }
+
+  getTask(taskId: string): StoredTask | null {
+    const row = this.database.prepare("SELECT id, mode, prompt, status, created_at, updated_at, summary, session_id FROM tasks WHERE id = ?").get(taskId);
+    return isTaskRow(row) ? {
+      id: row.id, mode: row.mode, prompt: row.prompt, status: row.status,
+      createdAt: row.created_at, updatedAt: row.updated_at, summary: row.summary, sessionId: row.session_id
+    } : null;
+  }
+
   saveCheckpoint(checkpoint: Checkpoint): void {
     this.database.prepare("INSERT INTO checkpoints (task_id, plan_json, state_json, created_at) VALUES (?, ?, ?, ?)")
       .run(checkpoint.taskId, JSON.stringify(checkpoint.plan), JSON.stringify(checkpoint.state), checkpoint.createdAt);
@@ -82,8 +96,8 @@ export class MemoryEngine {
   }
 
   listTasks(limit = 20): readonly StoredTask[] {
-    const rows = this.database.prepare("SELECT id, mode, prompt, status, created_at, updated_at, summary FROM tasks ORDER BY updated_at DESC LIMIT ?").all(limit);
-    return rows.filter(isTaskRow).map((row) => ({ id: row.id, mode: row.mode, prompt: row.prompt, status: row.status, createdAt: row.created_at, updatedAt: row.updated_at, summary: row.summary }));
+    const rows = this.database.prepare("SELECT id, mode, prompt, status, created_at, updated_at, summary, session_id FROM tasks ORDER BY updated_at DESC LIMIT ?").all(limit);
+    return rows.filter(isTaskRow).map((row) => ({ id: row.id, mode: row.mode, prompt: row.prompt, status: row.status, createdAt: row.created_at, updatedAt: row.updated_at, summary: row.summary, sessionId: row.session_id }));
   }
 
   getFileIndex(path: string): FileIndexEntry | null {
@@ -154,6 +168,13 @@ export class MemoryEngine {
         details_json TEXT NOT NULL, created_at TEXT NOT NULL
       ) STRICT;
     `);
+    this.ensureColumn("tasks", "session_id", "TEXT");
+  }
+
+  private ensureColumn(table: string, column: string, type: string): void {
+    const columns = this.database.prepare(`PRAGMA table_info(${table})`).all();
+    const exists = columns.some((row) => isRecord(row) && row.name === column);
+    if (!exists) this.database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
   }
 }
 
@@ -170,8 +191,8 @@ async function migrateLegacyDatabase(workspace: string, target: string): Promise
   await rm(legacy);
 }
 async function exists(path: string): Promise<boolean> { try { await stat(path); return true; } catch { return false; } }
-function isTaskRow(value: unknown): value is { id: string; mode: AgentMode; prompt: string; status: TaskStatus; created_at: string; updated_at: string; summary: string | null } {
-  return isRecord(value) && typeof value.id === "string" && typeof value.mode === "string" && typeof value.prompt === "string" && typeof value.status === "string" && typeof value.created_at === "string" && typeof value.updated_at === "string" && (typeof value.summary === "string" || value.summary === null);
+function isTaskRow(value: unknown): value is { id: string; mode: AgentMode; prompt: string; status: TaskStatus; created_at: string; updated_at: string; summary: string | null; session_id: string | null } {
+  return isRecord(value) && typeof value.id === "string" && typeof value.mode === "string" && typeof value.prompt === "string" && typeof value.status === "string" && typeof value.created_at === "string" && typeof value.updated_at === "string" && (typeof value.summary === "string" || value.summary === null) && (typeof value.session_id === "string" || value.session_id === null);
 }
 function isCheckpointRow(value: unknown): value is { task_id: string; plan_json: string; state_json: string; created_at: string } {
   return isRecord(value) && typeof value.task_id === "string" && typeof value.plan_json === "string" && typeof value.state_json === "string" && typeof value.created_at === "string";

@@ -24,6 +24,7 @@ export interface ModelRequest {
   readonly maxTokens: number;
   readonly outputSchema?: unknown;
   readonly signal?: AbortSignal;
+  readonly sessionId?: string;
 }
 
 export interface ModelResponse {
@@ -31,6 +32,7 @@ export interface ModelResponse {
   readonly model: string;
   readonly inputTokens?: number;
   readonly outputTokens?: number;
+  readonly sessionId?: string;
 }
 
 export interface ModelProvider {
@@ -54,4 +56,5 @@ export interface AgentTask {
   readonly prompt: string;
   readonly workspace: string;
   readonly status: TaskStatus;
+  readonly sessionId?: string;
 }

@@ -41,7 +41,7 @@ export class CodexLocalProvider implements ModelProvider {
     if (request.mode !== "ask" && request.mode !== "inspect" && request.mode !== "run" && request.mode !== "resume") {
       throw new Error("codex-local supports only ask, inspect, run and resume modes during the test phase");
     }
-    const thread = this.thread ?? this.startThread(request.workspace);
+    const thread = this.thread ?? this.openThread(request.workspace, request.sessionId);
     this.thread = thread;
     const turnOptions = {
       ...(request.signal === undefined ? {} : { signal: request.signal }),
@@ -54,20 +54,23 @@ export class CodexLocalProvider implements ModelProvider {
       ...(result.usage === null ? {} : {
         inputTokens: result.usage.input_tokens,
         outputTokens: result.usage.output_tokens
-      })
+      }),
+      ...(thread.id === null ? {} : { sessionId: thread.id })
     };
   }
 
-  private startThread(workspace: string): Thread {
-    return new Codex().startThread({
+  private openThread(workspace: string, sessionId?: string): Thread {
+    const options = {
       model: this.model,
       workingDirectory: workspace,
       skipGitRepoCheck: true,
-      sandboxMode: "read-only",
-      approvalPolicy: "never",
+      sandboxMode: "read-only" as const,
+      approvalPolicy: "never" as const,
       networkAccessEnabled: false,
-      webSearchMode: "disabled"
-    });
+      webSearchMode: "disabled" as const
+    };
+    const codex = new Codex();
+    return sessionId === undefined ? codex.startThread(options) : codex.resumeThread(sessionId, options);
   }
 }
 

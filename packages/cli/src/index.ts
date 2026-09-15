@@ -46,12 +46,8 @@ async function resumeTask(args: readonly string[]): Promise<void> {
   const [taskId, ...promptParts] = args;
   const prompt = promptParts.join(" ").trim();
   if (taskId === undefined || !prompt) fail("Usage: agent resume <task-id> <prompt>");
-  const memory = await MemoryEngine.open(workspace);
-  const checkpoint = memory.latestCheckpoint(taskId);
-  memory.close();
-  if (checkpoint === null) fail(`Checkpoint not found for task: ${taskId}`);
   const config = await loadConfig(workspace);
-  const result = await createRuntime(config, "resume").execute("resume", `Continue from trusted checkpoint:\n${JSON.stringify(checkpoint.state)}\n\nNew instruction:\n${prompt}`, workspace, config);
+  const result = await createRuntime(config, "resume").resume(taskId, prompt, workspace, config);
   console.log(result.response);
 }
 

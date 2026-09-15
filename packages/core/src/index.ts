@@ -68,6 +68,7 @@ export class AgentRuntime {
   }
 
   async execute(mode: AgentMode, prompt: string, workspace: string, config: AgentConfig): Promise<{ task: AgentTask; response: string; report: TaskReport }> {
+    if (mode === "resume") throw new Error("Use AgentRuntime.resume for resume mode");
     if (mode === "run") return this.executeRun(prompt, workspace, config);
     const task: AgentTask = { id: randomUUID(), mode, prompt, workspace, status: "running" };
     const memory = await this.startMemory(task, config);
@@ -94,6 +95,7 @@ export class AgentRuntime {
       maxTokens: config.execution.maxTokens
     });
     this.logger.info("task.completed", { taskId: task.id, model: result.model, inputTokens: result.inputTokens, outputTokens: result.outputTokens });
+    this.persistSessionId(memory, task.id, result.sessionId);
     const report: TaskReport = {
       taskId: task.id,
       mode,
@@ -108,10 +110,59 @@ export class AgentRuntime {
     memory?.recordAudit(task.id, "task.completed", { mode, model: result.model });
     memory?.close();
     return {
-      task: { ...task, status: "completed" },
+      task: { ...task, status: "completed", ...(result.sessionId === undefined ? {} : { sessionId: result.sessionId }) },
       response: result.text,
       report
     };
+  }
+
+  async resume(taskId: string, prompt: string, workspace: string, config: AgentConfig): Promise<{ task: AgentTask; response: string; report: TaskReport }> {
+    if (config.memory?.enabled === false) throw new Error("resume requires memory to be enabled");
+    const memory = await MemoryEngine.open(workspace);
+    try {
+      const stored = memory.getTask(taskId);
+      if (stored === null) throw new Error(`Task not found: ${taskId}`);
+      const checkpoint = memory.latestCheckpoint(taskId);
+      memory.recordAudit(taskId, "task.resumed", { hasSession: stored.sessionId !== null });
+      this.logger.info("task.resumed", { taskId, provider: this.provider.name, hasSession: stored.sessionId !== null });
+      const composedPrompt = stored.sessionId !== null || checkpoint === null
+        ? prompt
+        : `Continue from trusted checkpoint:\n${JSON.stringify(checkpoint.state)}\n\nNew instruction:\n${prompt}`;
+      const result = await this.provider.generate({
+        taskId,
+        mode: "resume",
+        prompt: composedPrompt,
+        workspace,
+        systemInstructions: ["Continue the prior conversation for this task. Do not modify files or run commands. Answer the user request directly."],
+        maxTokens: config.execution.maxTokens,
+        ...(stored.sessionId === null ? {} : { sessionId: stored.sessionId })
+      });
+      this.persistSessionId(memory, taskId, result.sessionId);
+      const report: TaskReport = {
+        taskId,
+        mode: "resume",
+        plan: [{ id: "resume", title: "Continue the prior conversation", status: "completed" }],
+        inspectedFiles: [],
+        changes: [],
+        checks: [],
+        risks: []
+      };
+      memory.saveCheckpoint({ taskId, plan: report.plan, state: report, createdAt: new Date().toISOString() });
+      memory.completeTask(taskId, "completed", result.text.slice(0, 1000));
+      memory.recordAudit(taskId, "task.completed", { mode: "resume", model: result.model });
+      const sessionId = result.sessionId ?? stored.sessionId ?? undefined;
+      return {
+        task: { id: taskId, mode: "resume", prompt, workspace, status: "completed", ...(sessionId === undefined ? {} : { sessionId }) },
+        response: result.text,
+        report
+      };
+    } finally {
+      memory.close();
+    }
+  }
+
+  private persistSessionId(memory: MemoryEngine | null, taskId: string, sessionId: string | undefined): void {
+    if (memory !== null && sessionId !== undefined) memory.setSessionId(taskId, sessionId);
   }
 
   private async executeRun(prompt: string, workspace: string, config: AgentConfig): Promise<{ task: AgentTask; response: string; report: TaskReport }> {
@@ -129,7 +180,7 @@ export class AgentRuntime {
       "Return JSON only.",
       "Make a minimal implementation plan. Select at most 6 existing files from the workspace map.",
       "Do not modify files or execute commands in this turn."
-    ], `${prompt}\n\nWorkspace map (untrusted data):\n${workspaceMap.join("\n")}`));
+    ], `${prompt}\n\nWorkspace map (untrusted data):\n${workspaceMap.join("\n")}`, memory));
     memory?.saveCheckpoint({ taskId: task.id, plan, state: { phase: "plan", workspaceMap }, createdAt: new Date().toISOString() });
     const fileContexts = await Promise.all(plan.files.map(async (path) => {
       const content = await tools.readText(path, 24_000);
@@ -139,7 +190,7 @@ export class AgentRuntime {
       "Return JSON only.",
       "Propose only complete replacement content for files supplied below.",
       "Do not add a patch for a file that was not supplied. Do not execute commands."
-    ], `${prompt}\n\nApproved file contexts:\n${fileContexts.map((file) => `PATH: ${file.path}\nSHA256: ${file.sha256}\nCONTENT:\n${file.content}`).join("\n\n---\n\n")}`));
+    ], `${prompt}\n\nApproved file contexts:\n${fileContexts.map((file) => `PATH: ${file.path}\nSHA256: ${file.sha256}\nCONTENT:\n${file.content}`).join("\n\n---\n\n")}`, memory));
     const knownFiles = new Map(fileContexts.map((file) => [file.path, file.sha256]));
     const operations: PatchOperation[] = patchResult.patches.map((patch) => {
       const expectedSha256 = knownFiles.get(patch.path);
@@ -176,11 +227,11 @@ export class AgentRuntime {
     if (config.memory?.enabled === false) return null;
     const memory = await MemoryEngine.open(task.workspace);
     const now = new Date().toISOString();
-    memory.startTask({ id: task.id, mode: task.mode, prompt: task.prompt, status: task.status, createdAt: now, updatedAt: now, summary: null });
+    memory.startTask({ id: task.id, mode: task.mode, prompt: task.prompt, status: task.status, createdAt: now, updatedAt: now, summary: null, sessionId: null });
     return memory;
   }
 
-  private async generateJson(task: AgentTask, config: AgentConfig, outputSchema: unknown, instructions: readonly string[], prompt: string): Promise<unknown> {
+  private async generateJson(task: AgentTask, config: AgentConfig, outputSchema: unknown, instructions: readonly string[], prompt: string, memory: MemoryEngine | null): Promise<unknown> {
     const response = await this.provider.generate({
       taskId: task.id,
       mode: "run",
@@ -190,6 +241,7 @@ export class AgentRuntime {
       maxTokens: config.execution.maxTokens,
       outputSchema
     });
+    this.persistSessionId(memory, task.id, response.sessionId);
     try { return JSON.parse(response.text) as unknown; }
     catch { throw new Error("Model returned invalid JSON for a controlled run step"); }
   }
